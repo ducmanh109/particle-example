@@ -84,6 +84,10 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+
+        manifestPlaceholders["PN_PROJECT_ID"] = "869f3430-7f88-4fe4-afef-1d300f6c5de6"
+        manifestPlaceholders["PN_PROJECT_CLIENT_KEY"] = "c8AfXtRdc4L8uK4qDZwi8ruvfZKPsKmkN0mr2Cf0"
+        manifestPlaceholders["PN_APP_ID"] = "7ce13d8a-a0be-4c95-88ec-55c393cf2630"
     }
     signingConfigs {
         debug {
@@ -104,6 +108,10 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+
+    dataBinding {
+      enabled = true
     }
 }
 

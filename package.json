@@ -10,6 +10,11 @@
     "test": "jest"
   },
   "dependencies": {
+    "@particle-network/rn-aa": "^2.0.6",
+    "@particle-network/rn-auth-core": "^2.0.6",
+    "@particle-network/rn-base": "^2.0.6",
+    "@particle-network/rn-connect": "^2.0.6",
+    "ethers": "^6.15.0",
     "react": "19.0.0",
     "react-native": "0.79.0"
   },

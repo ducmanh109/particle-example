@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+   ParticleNetwork-Info.plist
+   ParticleExample
+
+   Created by Duc Manh on 2/8/25.
+   Copyright (c) 2025 ___ORGANIZATIONNAME___. All rights reserved.
+-->
+<plist version="1.0">
+<dict>
+	<key>PROJECT_UUID</key>
+      <string>869f3430-7f88-4fe4-afef-1d300f6c5de6</string>
+   <key>PROJECT_CLIENT_KEY</key>
+      <string>c8AfXtRdc4L8uK4qDZwi8ruvfZKPsKmkN0mr2Cf0</string>
+   <key>PROJECT_APP_UUID</key>
+      <string>7ce13d8a-a0be-4c95-88ec-55c393cf2630</string>
+</dict>
+</plist>

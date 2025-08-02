@@ -17,10 +17,42 @@ end
 target 'ParticleExample' do
   config = use_native_modules!
 
+  use_frameworks! :linkage => :static
+
+  flags = get_default_flags()
+
+  pod 'ConnectWalletConnectAdapter'
+  pod 'ConnectPhantomAdapter'
+  pod 'ConnectEVMAdapter'
+  pod 'ConnectSolanaAdapter'
+  pod 'ParticleConnect'
+  pod 'ConnectCommon'
+
+  pod 'ParticleNetworkBase'
+  pod 'ParticleNetworkChains'
+
+  pod 'AuthCoreAdapter', :modular_headers => false
+  pod 'ParticleAuthCore', :modular_headers => false
+  pod 'ParticleMPCCore'
+  pod 'Thresh'
+  
+  pod 'ParticleConnectKit'
+
+  pod 'AWSCore', :modular_headers => false
+
+  pod 'SwiftyUserDefaults', :git => 'https://github.com/SunZhiC/SwiftyUserDefaults.git', :branch => 'master'
+  pod 'WalletConnectSwiftV2', :git => 'https://github.com/SunZhiC/WalletConnectSwiftV2.git', :branch => 'particle'
+  pod 'SkeletonView', :git => 'https://github.com/SunZhiC/SkeletonView.git', :branch => 'main'
+
   use_react_native!(
     :path => config[:reactNativePath],
+
+    :hermes_enabled => true,
+    :fabric_enabled => flags[:fabric_enabled],
+
     # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
+    
   )
 
   post_install do |installer|
@@ -31,5 +63,14 @@ target 'ParticleExample' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+          if target.name == 'SDWebImage' || target.name == 'SDWebImageSwiftUI'
+            config.build_settings['DEFINES_MODULE'] = 'YES'
+          end
+        end
+      end
   end
 end

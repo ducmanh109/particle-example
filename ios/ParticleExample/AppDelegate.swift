@@ -2,6 +2,7 @@ import UIKit
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
+import react_native_particle_connect
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -45,4 +46,13 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
     Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
   }
+}
+
+func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+   if ParticleConnectSchemeManager.handleUrl(url) {
+     return true
+   } else {
+     // Handle other URL schemes here if needed
+   }
+   return true
 }
