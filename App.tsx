@@ -28,7 +28,7 @@ import {WalletType} from '@particle-network/rn-connect';
 import BigNumber from 'bignumber.js';
 import {ethers} from 'ethers';
 import {Colors, Header} from 'react-native/Libraries/NewAppScreen';
-import {ParticleProvider, useParticle} from './ParticleProvider';
+import {ParticleProvider, useParticle} from './ParticleProvider.tsx';
 
 const Content = () => {
   const isDarkMode = useColorScheme() === 'dark';
