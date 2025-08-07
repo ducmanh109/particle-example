@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Backup rules for a standard Android application -->
+    <include domain="file" path="shared_prefs"/>
+    <exclude domain="file" path="databases"/>
+    <exclude domain="file" path="cache"/>
+</full-backup-content>

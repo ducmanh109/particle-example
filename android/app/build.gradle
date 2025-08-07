@@ -124,4 +124,16 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // Exclude conflicting BouncyCastle libraries
+    configurations.all {
+        resolutionStrategy {
+            // Force a specific version of BouncyCastle
+            force 'org.bouncycastle:bcprov-jdk18on:1.77'
+            
+            // Exclude other versions
+            exclude group: 'org.bouncycastle', module: 'bcprov-jdk15on'
+            exclude group: 'org.bouncycastle', module: 'bcprov-jdk15to18'
+        }
+    }
 }

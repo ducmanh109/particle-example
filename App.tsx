@@ -28,8 +28,8 @@ import {WalletType} from '@particle-network/rn-connect';
 import BigNumber from 'bignumber.js';
 import {ethers} from 'ethers';
 import {Colors, Header} from 'react-native/Libraries/NewAppScreen';
-import {ParticleProvider, useParticle} from './ParticleProvider';
-
+import {ParticleProvider, useParticle} from './ParticleProvider.tsx';
+import * as particleAuthCore from '@particle-network/rn-auth-core';
 const Content = () => {
   const isDarkMode = useColorScheme() === 'dark';
 
@@ -765,15 +765,39 @@ const Content = () => {
     }
   };
 
+  //const onConnectWallet = async () => {
+  //try {
+  // ERROR NOTE
+  // sign message popup need to be removed when calling connect function
+  //  const responseConnect = await connect(WalletType.AuthCore, {
+  //    loginType: LoginType.Google,
+  //    supportAuthType: [SupportAuthType.Google],
+  //    socialLoginPrompt: SocialLoginPrompt.SelectAccount,
+  //  });
+
+  //  const signature = await signMessage('hihihehe');
+
+  //  console.log(
+  //    'responseConnect-->',
+  //    //responseConnect,
+  //    'signature--->',
+  //  signature,
+  //  );
+  //} catch (error) {
+  //console.error('Error connecting wallet:', error);
+  // }
+  //};
+
   const onConnectWallet = async () => {
     try {
       // ERROR NOTE
       // sign message popup need to be removed when calling connect function
-      const responseConnect = await connect(WalletType.AuthCore, {
-        loginType: LoginType.Google,
-        supportAuthType: [SupportAuthType.Google],
-        socialLoginPrompt: SocialLoginPrompt.SelectAccount,
-      });
+      const responseConnect = await particleAuthCore.connect(
+        LoginType.Google,
+        null,
+        [],
+        SocialLoginPrompt.Consent,
+      );
 
       const signature = await signMessage('hihihehe');
 
