@@ -1,890 +1,327 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
 import React from 'react';
 import {
-  Button,
-  ScrollView,
+  View,
+  Text,
   StatusBar,
   useColorScheme,
-  View,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 
-import * as particleAA from '@particle-network/rn-aa';
-import {WholeFeeQuote} from '@particle-network/rn-aa';
-import {evm} from '@particle-network/rn-auth-core';
+import * as particleConnect from '@particle-network/rn-connect';
+import {ParticleProvider, useParticle} from './ParticleProvider';
+import {WalletType} from '@particle-network/rn-connect';
 import {
-  AAFeeMode,
-  EvmService,
   LoginType,
   SocialLoginPrompt,
   SupportAuthType,
 } from '@particle-network/rn-base';
-import {WalletType} from '@particle-network/rn-connect';
-import BigNumber from 'bignumber.js';
-import {ethers} from 'ethers';
-import {Colors, Header} from 'react-native/Libraries/NewAppScreen';
-import {ParticleProvider, useParticle} from './ParticleProvider.tsx';
-import * as particleAuthCore from '@particle-network/rn-auth-core';
+
+// --- tiny theme ---
+const useTheme = () => {
+  const isDark = useColorScheme() === 'dark';
+  const palette = {
+    bg: isDark ? '#0B0F14' : '#F5F7FB',
+    card: isDark ? '#131A22' : '#FFFFFF',
+    cardBorder: isDark ? '#1F2937' : '#E5E7EB',
+    text: isDark ? '#E5E7EB' : '#0B1220',
+    textMuted: isDark ? '#9CA3AF' : '#4B5563',
+    divider: isDark ? '#1F2937' : '#E5E7EB',
+
+    primary: '#2F80ED',
+    danger: '#E45858',
+    secondary: isDark ? '#1F2937' : '#EEF2F7', // filled neutral
+    ghostBorder: isDark ? '#374151' : '#D1D5DB',
+    badgeBg: isDark ? '#0F766E' : '#DCFCE7',
+    badgeText: isDark ? '#A7F3D0' : '#065F46',
+  };
+  return {isDark, palette};
+};
+
+const Button = ({
+  title,
+  onPress,
+  disabled,
+  variant = 'primary',
+}: {
+  title: string;
+  onPress: () => void | Promise<void>;
+  disabled?: boolean;
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+}) => {
+  const {palette} = useTheme();
+
+  const baseStyle = [
+    styles.btn,
+    variant === 'primary' && {
+      backgroundColor: palette.primary,
+      borderColor: palette.primary,
+    },
+    variant === 'secondary' && {
+      backgroundColor: palette.secondary,
+      borderColor: palette.cardBorder,
+    },
+    variant === 'danger' && {
+      backgroundColor: palette.danger,
+      borderColor: palette.danger,
+    },
+    variant === 'ghost' && {
+      backgroundColor: 'transparent',
+      borderColor: palette.ghostBorder,
+    },
+    disabled && styles.btn_disabled,
+  ];
+
+  const labelStyle = [
+    styles.btn_label,
+    (variant === 'primary' || variant === 'danger') && {color: '#FFFFFF'},
+    variant === 'secondary' && {color: '#0B1220'},
+    variant === 'ghost' && {color: palette.text},
+    disabled && {opacity: 0.9},
+  ];
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({pressed}) => [
+        baseStyle,
+        pressed && !disabled && styles.btn_pressed,
+      ]}>
+      <Text style={labelStyle}>{title}</Text>
+    </Pressable>
+  );
+};
+
+const Row = ({label, value}: {label: string; value?: string | null}) => {
+  const {palette} = useTheme();
+  return (
+    <View style={styles.row}>
+      <Text style={[styles.row_label, {color: palette.textMuted}]}>
+        {label}
+      </Text>
+      <Text style={[styles.row_value, {color: palette.text}]} numberOfLines={1}>
+        {value || '—'}
+      </Text>
+    </View>
+  );
+};
+
+function shorten(addr: string, head = 6, tail = 4) {
+  if (!addr) {
+    return '—';
+  }
+  if (addr.length <= head + tail) {
+    return addr;
+  }
+  return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
+}
+
 const Content = () => {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
-  /*
-   * To keep the template simple and small we're adding padding to prevent view
-   * from rendering under the System UI.
-   * For bigger apps the recommendation is to use `react-native-safe-area-context`:
-   * https://github.com/AppAndFlow/react-native-safe-area-context
-   *
-   * You can read more about it here:
-   * https://github.com/react-native-community/discussions-and-proposals/discussions/827
-   */
-  const safePadding = '5%';
-  const zerooneGallery = {
-    address: '0xAB90a599C90FD706294F429eFd6810603707AacC',
-    c_chain_address: '0x02FF4CF1E5522bdc6f85CCB383dD1D2521460613',
-    abi: [
-      {
-        inputs: [],
-        name: 'AccessControlBadConfirmation',
-        type: 'error',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: 'account',
-            type: 'address',
-          },
-          {
-            internalType: 'bytes32',
-            name: 'neededRole',
-            type: 'bytes32',
-          },
-        ],
-        name: 'AccessControlUnauthorizedAccount',
-        type: 'error',
-      },
-      {
-        inputs: [],
-        name: 'InvalidInitialization',
-        type: 'error',
-      },
-      {
-        inputs: [],
-        name: 'NotInitializing',
-        type: 'error',
-      },
-      {
-        anonymous: false,
-        inputs: [
-          {
-            indexed: false,
-            internalType: 'uint64',
-            name: 'version',
-            type: 'uint64',
-          },
-        ],
-        name: 'Initialized',
-        type: 'event',
-      },
-      {
-        anonymous: false,
-        inputs: [
-          {
-            indexed: false,
-            internalType: 'uint256',
-            name: 'itemId',
-            type: 'uint256',
-          },
-          {
-            indexed: false,
-            internalType: 'address',
-            name: 'collection',
-            type: 'address',
-          },
-          {
-            indexed: false,
-            internalType: 'uint256',
-            name: 'starToken',
-            type: 'uint256',
-          },
-          {
-            indexed: false,
-            internalType: 'uint256',
-            name: 'endToken',
-            type: 'uint256',
-          },
-        ],
-        name: 'ItemAdded',
-        type: 'event',
-      },
-      {
-        anonymous: false,
-        inputs: [
-          {
-            indexed: false,
-            internalType: 'uint256',
-            name: 'itemId',
-            type: 'uint256',
-          },
-          {
-            indexed: false,
-            internalType: 'uint256',
-            name: 'price',
-            type: 'uint256',
-          },
-        ],
-        name: 'ItemConvertedToPaid',
-        type: 'event',
-      },
-      {
-        anonymous: false,
-        inputs: [
-          {
-            indexed: true,
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-          {
-            indexed: true,
-            internalType: 'bytes32',
-            name: 'previousAdminRole',
-            type: 'bytes32',
-          },
-          {
-            indexed: true,
-            internalType: 'bytes32',
-            name: 'newAdminRole',
-            type: 'bytes32',
-          },
-        ],
-        name: 'RoleAdminChanged',
-        type: 'event',
-      },
-      {
-        anonymous: false,
-        inputs: [
-          {
-            indexed: true,
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-          {
-            indexed: true,
-            internalType: 'address',
-            name: 'account',
-            type: 'address',
-          },
-          {
-            indexed: true,
-            internalType: 'address',
-            name: 'sender',
-            type: 'address',
-          },
-        ],
-        name: 'RoleGranted',
-        type: 'event',
-      },
-      {
-        anonymous: false,
-        inputs: [
-          {
-            indexed: true,
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-          {
-            indexed: true,
-            internalType: 'address',
-            name: 'account',
-            type: 'address',
-          },
-          {
-            indexed: true,
-            internalType: 'address',
-            name: 'sender',
-            type: 'address',
-          },
-        ],
-        name: 'RoleRevoked',
-        type: 'event',
-      },
-      {
-        anonymous: false,
-        inputs: [
-          {
-            indexed: false,
-            internalType: 'address',
-            name: 'collection',
-            type: 'address',
-          },
-          {
-            indexed: false,
-            internalType: 'uint256',
-            name: 'tokenId',
-            type: 'uint256',
-          },
-          {
-            indexed: false,
-            internalType: 'address',
-            name: 'to',
-            type: 'address',
-          },
-        ],
-        name: 'TokenCollected',
-        type: 'event',
-      },
-      {
-        inputs: [],
-        name: 'DEFAULT_ADMIN_ROLE',
-        outputs: [
-          {
-            internalType: 'bytes32',
-            name: '',
-            type: 'bytes32',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: 'collectionAddress',
-            type: 'address',
-          },
-          {
-            internalType: 'uint256',
-            name: 'startToken',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'endToken',
-            type: 'uint256',
-          },
-          {
-            internalType: 'address',
-            name: 'from',
-            type: 'address',
-          },
-        ],
-        name: 'addItem',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: 'collectionAddress',
-            type: 'address',
-          },
-          {
-            internalType: 'uint256',
-            name: 'startTime',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'endTime',
-            type: 'uint256',
-          },
-          {
-            internalType: 'address',
-            name: 'from',
-            type: 'address',
-          },
-          {
-            internalType: 'uint256',
-            name: 'artworkId',
-            type: 'uint256',
-          },
-        ],
-        name: 'addOEItem',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'uint256',
-            name: 'itemId',
-            type: 'uint256',
-          },
-        ],
-        name: 'collect',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'uint256',
-            name: 'itemId',
-            type: 'uint256',
-          },
-        ],
-        name: 'collectOpenEditionArt',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: '',
-            type: 'address',
-          },
-        ],
-        name: 'creatorToLastItemId',
-        outputs: [
-          {
-            internalType: 'uint256',
-            name: '',
-            type: 'uint256',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [],
-        name: 'currentItemCounter',
-        outputs: [
-          {
-            internalType: 'uint256',
-            name: '',
-            type: 'uint256',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [],
-        name: 'destinationChain',
-        outputs: [
-          {
-            internalType: 'bytes32',
-            name: '',
-            type: 'bytes32',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [],
-        name: 'destinationRecipientAddress',
-        outputs: [
-          {
-            internalType: 'address',
-            name: '',
-            type: 'address',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'uint256',
-            name: 'itemId',
-            type: 'uint256',
-          },
-        ],
-        name: 'getItemDetails',
-        outputs: [
-          {
-            components: [
-              {
-                internalType: 'bool',
-                name: 'exists',
-                type: 'bool',
-              },
-              {
-                internalType: 'address',
-                name: 'collectionAddress',
-                type: 'address',
-              },
-              {
-                internalType: 'uint256',
-                name: 'startToken',
-                type: 'uint256',
-              },
-              {
-                internalType: 'uint256',
-                name: 'endToken',
-                type: 'uint256',
-              },
-              {
-                internalType: 'uint256',
-                name: 'lastTokenCollected',
-                type: 'uint256',
-              },
-            ],
-            internalType: 'struct ZerooneGallery.Item',
-            name: '',
-            type: 'tuple',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-        ],
-        name: 'getRoleAdmin',
-        outputs: [
-          {
-            internalType: 'bytes32',
-            name: '',
-            type: 'bytes32',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-          {
-            internalType: 'address',
-            name: 'account',
-            type: 'address',
-          },
-        ],
-        name: 'grantRole',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-          {
-            internalType: 'address',
-            name: 'account',
-            type: 'address',
-          },
-        ],
-        name: 'hasRole',
-        outputs: [
-          {
-            internalType: 'bool',
-            name: '',
-            type: 'bool',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: 'marketControllerAddr',
-            type: 'address',
-          },
-        ],
-        name: 'initialize',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'uint256',
-            name: '',
-            type: 'uint256',
-          },
-        ],
-        name: 'itemIdToCreator',
-        outputs: [
-          {
-            internalType: 'address',
-            name: '',
-            type: 'address',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'uint256',
-            name: '',
-            type: 'uint256',
-          },
-        ],
-        name: 'itemIdToPrice',
-        outputs: [
-          {
-            internalType: 'uint256',
-            name: '',
-            type: 'uint256',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [],
-        name: 'messenger',
-        outputs: [
-          {
-            internalType: 'contract ITeleporterMessenger',
-            name: '',
-            type: 'address',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: 'operator',
-            type: 'address',
-          },
-          {
-            internalType: 'address',
-            name: 'from',
-            type: 'address',
-          },
-          {
-            internalType: 'uint256',
-            name: 'tokenId',
-            type: 'uint256',
-          },
-          {
-            internalType: 'bytes',
-            name: 'data',
-            type: 'bytes',
-          },
-        ],
-        name: 'onERC721Received',
-        outputs: [
-          {
-            internalType: 'bytes4',
-            name: '',
-            type: 'bytes4',
-          },
-        ],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes32',
-            name: '',
-            type: 'bytes32',
-          },
-          {
-            internalType: 'address',
-            name: '',
-            type: 'address',
-          },
-          {
-            internalType: 'bytes',
-            name: 'message',
-            type: 'bytes',
-          },
-        ],
-        name: 'receiveTeleporterMessage',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-          {
-            internalType: 'address',
-            name: 'callerConfirmation',
-            type: 'address',
-          },
-        ],
-        name: 'renounceRole',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes32',
-            name: 'role',
-            type: 'bytes32',
-          },
-          {
-            internalType: 'address',
-            name: 'account',
-            type: 'address',
-          },
-        ],
-        name: 'revokeRole',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes32',
-            name: '_destinationChain',
-            type: 'bytes32',
-          },
-        ],
-        name: 'setDestinationChain',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: '_destinationRecipientAddress',
-            type: 'address',
-          },
-        ],
-        name: 'setDestinationRecipientAddress',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'address',
-            name: '_messenger',
-            type: 'address',
-          },
-        ],
-        name: 'setMessenger',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'bytes4',
-            name: 'interfaceId',
-            type: 'bytes4',
-          },
-        ],
-        name: 'supportsInterface',
-        outputs: [
-          {
-            internalType: 'bool',
-            name: '',
-            type: 'bool',
-          },
-        ],
-        stateMutability: 'view',
-        type: 'function',
-      },
-      {
-        inputs: [
-          {
-            internalType: 'uint256',
-            name: 'price',
-            type: 'uint256',
-          },
-        ],
-        name: 'upgradeLatestItem',
-        outputs: [],
-        stateMutability: 'nonpayable',
-        type: 'function',
-      },
-    ],
-  };
+  const {isDark, palette} = useTheme();
+  const bg = {backgroundColor: palette.bg};
 
   const {
     connect,
     sendCode,
     signMessage,
-    getSmartAccountAddress,
-    getEoaAddress,
     currentChain,
     switchToSubnet,
     switchToCChain,
+    particleUserInfo,
+    activeWalletType,
+    activeAddress,
+    isLoading,
   } = useParticle();
 
-  console.log('currentChain>>>>', currentChain);
+  // --- NEW: signature state ---
+  const [lastSig, setLastSig] = React.useState<string | null>(null);
+  const [sigErr, setSigErr] = React.useState<string | null>(null);
 
-  const onSendCode = async () => {
-    const email = 'monster1092k@gmail.com';
-
+  // --- actions ---
+  const onSendEmailCode = async () => {
     try {
-      const response = await sendCode(email);
-      console.log('Response:', response);
-    } catch (error) {
-      console.error('Error sending code:', error);
+      const ok = await sendCode('dev@example.com');
+      console.log('Email code sent:', ok);
+    } catch (e) {
+      console.log('sendCode error:', e);
     }
   };
 
-  //const onConnectWallet = async () => {
-  //try {
-  // ERROR NOTE
-  // sign message popup need to be removed when calling connect function
-  //  const responseConnect = await connect(WalletType.AuthCore, {
-  //    loginType: LoginType.Google,
-  //    supportAuthType: [SupportAuthType.Google],
-  //    socialLoginPrompt: SocialLoginPrompt.SelectAccount,
-  //  });
-
-  //  const signature = await signMessage('hihihehe');
-
-  //  console.log(
-  //    'responseConnect-->',
-  //    //responseConnect,
-  //    'signature--->',
-  //  signature,
-  //  );
-  //} catch (error) {
-  //console.error('Error connecting wallet:', error);
-  // }
-  //};
-
-  const onConnectWallet = async () => {
+  const onLoginAuthCore = async () => {
     try {
-      // ERROR NOTE
-      // sign message popup need to be removed when calling connect function
-      const responseConnect = await particleAuthCore.connect(
-        LoginType.Google,
-        null,
-        [],
-        SocialLoginPrompt.Consent,
-      );
-
-      const signature = await signMessage('hihihehe');
-
-      console.log(
-        'responseConnect-->',
-        responseConnect,
-        'signature--->',
-        signature,
-      );
-    } catch (error) {
-      console.error('Error connecting wallet:', error);
+      await connect(WalletType.AuthCore, {
+        loginType: LoginType.Google,
+        supportAuthType: [SupportAuthType.Google],
+        socialLoginPrompt: SocialLoginPrompt.Consent,
+      });
+    } catch (e) {
+      console.log('connect error:', e);
     }
   };
 
-  async function handleCollect() {
-    try {
-      // 1. Get smart account address
-      const smartAccountAddress = await getSmartAccountAddress();
-      if (!smartAccountAddress) {
-        console.log('Please connect your wallet first');
+  const onLogout = async () => {
+    const publicAddress = activeAddress;
+    const walletType = activeWalletType!;
+    if (publicAddress === undefined) {
+      console.log('publicAddress is underfined, you need connect');
+      return;
+    }
+    const result = await particleConnect.disconnect(walletType, publicAddress!);
+    console.log('disconnect result:', result);
+  };
 
+  const onSign = async () => {
+    try {
+      setLastSig(null);
+      setSigErr(null);
+      if (activeAddress === null) {
+        console.log('Connect first');
         return;
       }
-
-      // 2. Encode contract call data
-      const contractInterface = new ethers.Interface(zerooneGallery.abi);
-      const collectTxData = contractInterface.encodeFunctionData('collect', [
-        38098,
-      ]);
-
-      // 3. Create transaction
-      const transaction = await EvmService.createTransaction(
-        smartAccountAddress,
-        collectTxData,
-        BigNumber(0), // value
-        zerooneGallery.address,
-      );
-
-      const eoaAddress = await getEoaAddress();
-
-      // ERROR NOTE: this cause error
-      // Collect error: {message: 'AA service not support this chain'}
-      const wholeFeeQuote = (await particleAA.rpcGetFeeQuotes(eoaAddress!, [
-        transaction,
-      ])) as WholeFeeQuote;
-
-      // 4. Send transaction (Sponsored mode)
-      const userOpResponse = await evm.sendTransaction(
-        transaction,
-        AAFeeMode.gasless(wholeFeeQuote),
-      );
-
-      console.log('userOpResponse', userOpResponse);
-    } catch (error) {
-      console.log('Collect error:', error);
+      const sig = await signMessage('GM, Particle!');
+      setLastSig(sig ?? null);
+      console.log('Signature:', sig);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setSigErr(msg);
+      console.log('sign error:', e);
     }
-  }
+  };
 
   return (
-    <View style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView style={backgroundStyle}>
-        <View style={{paddingRight: safePadding}}>
-          <Header />
+    <View style={[styles.screen, bg]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={[styles.title, {color: palette.text}]}>
+          Particle RN Demo
+        </Text>
+
+        <View
+          style={[
+            styles.card,
+            {backgroundColor: palette.card, borderColor: palette.cardBorder},
+          ]}>
+          <View style={styles.card_header}>
+            <Text style={[styles.card_title, {color: palette.text}]}>
+              Session
+            </Text>
+            <View
+              style={[
+                styles.badge,
+                {
+                  backgroundColor: palette.badgeBg,
+                  borderColor: palette.cardBorder,
+                },
+              ]}>
+              <Text style={[styles.badge_text, {color: palette.badgeText}]}>
+                {currentChain?.name} #{currentChain?.id}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.divider, {backgroundColor: palette.divider}]} />
+
+          <Row
+            label="Chain"
+            value={`${currentChain?.name} (#${currentChain?.id})`}
+          />
+          <Row label="Wallet Type" value={activeWalletType ?? '—'} />
+          <Row
+            label="Address"
+            value={activeAddress ? shorten(activeAddress) : '—'}
+          />
+          <Row label="User" value={particleUserInfo?.name ?? '—'} />
+          <Row label="Email" value={particleUserInfo?.google_email ?? '—'} />
+        </View>
+
+        <View style={styles.actions}>
+          {!activeAddress ? (
+            <Button
+              title="Log in with AuthCore (Google)"
+              onPress={onLoginAuthCore}
+              variant="primary"
+              disabled={isLoading}
+            />
+          ) : (
+            <Button
+              title="Logout"
+              onPress={onLogout}
+              variant="danger"
+              disabled={isLoading}
+            />
+          )}
+
+          <Button
+            title="Sign Message"
+            onPress={onSign}
+            variant="primary"
+            disabled={!activeAddress || isLoading}
+          />
+
+          {/* --- NEW: signature output box --- */}
+          {lastSig && (
+            <View
+              style={[
+                styles.codeBox,
+                // eslint-disable-next-line react-native/no-inline-styles
+                {
+                  backgroundColor: isDark ? '#0E141B' : '#F9FAFB',
+                  borderColor: palette.cardBorder,
+                },
+              ]}>
+              <Text style={[styles.codeTitle, {color: palette.textMuted}]}>
+                Last signature
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <Text
+                  selectable
+                  numberOfLines={1}
+                  style={[styles.mono, {color: palette.text}]}>
+                  {lastSig}
+                </Text>
+              </ScrollView>
+            </View>
+          )}
+
+          {sigErr && (
+            <Text style={[styles.errorText, {color: palette.danger}]}>
+              Sign failed: {sigErr}
+            </Text>
+          )}
+
+          <View style={styles.switchRow}>
+            <Button
+              title="Switch to Subnet"
+              onPress={() => {
+                switchToSubnet();
+              }}
+              variant="ghost"
+              disabled={isLoading}
+            />
+            <Button
+              title="Switch to Mainnet"
+              onPress={() => {
+                switchToCChain();
+              }}
+              variant="ghost"
+              disabled={isLoading}
+            />
+          </View>
+
+          {isLoading && (
+            <View style={styles.loading}>
+              <ActivityIndicator />
+              <Text style={[styles.loading_text, {color: palette.textMuted}]}>
+                Working…
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
-
-      <Button title="Send email code" color={'red'} onPress={onSendCode} />
-
-      <Button title="Log in" color={'green'} onPress={onConnectWallet} />
-
-      <Button title="Call SC" color={'yellow'} onPress={handleCollect} />
-
-      <Button
-        title="Switch to subnet"
-        color={'brown'}
-        onPress={switchToSubnet}
-      />
-
-      <Button
-        title="Switch to mainnet"
-        color={'gray'}
-        onPress={switchToCChain}
-      />
     </View>
   );
 };
@@ -898,3 +335,91 @@ function App(): React.JSX.Element {
 }
 
 export default App;
+
+// ---- styles ----
+const styles = StyleSheet.create({
+  screen: {flex: 1},
+  container: {padding: 16, gap: 16},
+
+  title: {fontSize: 22, fontWeight: '800', textAlign: 'center'},
+
+  card: {
+    borderRadius: 14,
+    padding: 16,
+    gap: 8,
+    borderWidth: 1,
+    // subtle shadow (Android uses elevation)
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: {width: 0, height: 4},
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  card_header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  card_title: {fontWeight: '700', fontSize: 16},
+  divider: {height: 1, marginVertical: 8, borderRadius: 1},
+
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  badge_text: {fontSize: 12, fontWeight: '700'},
+
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  row_label: {fontSize: 14},
+  row_value: {flex: 1, textAlign: 'right', fontWeight: '700', fontSize: 14},
+
+  actions: {gap: 12},
+
+  btn: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  btn_disabled: {opacity: 0.6},
+  btn_pressed: {opacity: 0.9},
+  btn_label: {fontWeight: '800'},
+
+  switchRow: {flexDirection: 'row', gap: 12, justifyContent: 'space-between'},
+
+  loading: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    alignSelf: 'center',
+  },
+  loading_text: {},
+
+  // --- NEW styles for signature box ---
+  mono: {
+    fontFamily: Platform.select({ios: 'Menlo', android: 'monospace'}),
+    fontSize: 12,
+  },
+  codeBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    gap: 6,
+  },
+  codeTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  errorText: {
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+});
