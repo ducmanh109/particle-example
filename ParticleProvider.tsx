@@ -1,524 +1,564 @@
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-} from 'react';
-import {Buffer} from 'buffer';
-
-import {ChainInfo, Avalanche, Zeroone} from '@particle-network/chains';
-
-import * as particleBase from '@particle-network/rn-base';
-import {
-  Env,
-  ParticleInfo,
-  SecurityAccountConfig,
-  EvmService,
-  SmartAccountInfo,
-  AccountName,
-} from '@particle-network/rn-base';
-
+import {ChainInfo, Zeroone, Avalanche} from '@particle-network/chains';
+import * as particleAA from '@particle-network/rn-aa';
 import * as particleAuthCore from '@particle-network/rn-auth-core';
 import {evm} from '@particle-network/rn-auth-core';
-
+import * as particleBase from '@particle-network/rn-base';
+import {
+  AccountName,
+  Env,
+  EvmService,
+  ParticleInfo,
+  SecurityAccountConfig,
+  SmartAccountInfo,
+} from '@particle-network/rn-base';
 import * as particleConnect from '@particle-network/rn-connect';
 import {WalletType} from '@particle-network/rn-connect';
+import {Buffer} from 'buffer';
+import React, {createContext, useContext, useEffect, useMemo} from 'react';
 
-import * as particleAA from '@particle-network/rn-aa';
-import {LoginType, SupportAuthType} from '@particle-network/rn-base';
+let isConnected = false;
+let eoaAddress: null | string = null;
 
-// --- connect chain sync helper ---
-async function setConnectChain(chainInfo: ChainInfo) {
-  const anyConnect = particleConnect as any;
-  if (typeof anyConnect.setChain === 'function') {
-    await anyConnect.setChain(chainInfo);
-  } else if (typeof anyConnect.setChainInfo === 'function') {
-    await anyConnect.setChainInfo(chainInfo);
-  }
-}
+// Define your chain configurations
+const AVALANCHE_C_CHAIN: ChainInfo = Avalanche;
 
-// ---------- config ----------
-const DEFAULT_CHAIN: ChainInfo = Avalanche;
-const ALT_CHAIN: ChainInfo = Zeroone;
+const ZEROONE_SUBNET: ChainInfo = Zeroone;
 
-ParticleInfo.projectId = '869f3430-7f88-4fe4-afef-1d300f6c5de6';
-ParticleInfo.clientKey = 'c8AfXtRdc4L8uK4qDZwi8ruvfZKPsKmkN0mr2Cf0';
-
-if (!ParticleInfo.projectId || !ParticleInfo.clientKey) {
-  throw new Error('Missing Particle project credentials.');
-}
-
-// ---------- types ----------
-type SmartAccountData = {
+interface SmartAccountData {
   chainInfo: ChainInfo;
   smartAccountAddress?: string;
   isDeployed?: boolean;
   lastUpdated?: Date;
-};
+}
 
-type ParticleContextType = {
-  activeWalletType: WalletType | null;
-  activeAddress: string | null;
-
-  particleUserInfo: particleAuthCore.UserInfo | null;
+interface ParticleContextType {
+  particleUserInfo: particleAuthCore.UserInfo | null | undefined;
   isLoading: boolean;
-
   currentChain: ChainInfo;
+  smartAccounts: Map<number, SmartAccountData>;
+  smartAccount: SmartAccountData | undefined;
+
+  // Connection methods
+  connect: (
+    walletType: particleConnect.WalletType,
+    config?: particleConnect.ParticleConnectConfig,
+  ) => Promise<particleAuthCore.UserInfo | undefined>;
+  getConnected: () => Promise<boolean>;
+  disconnect: () => Promise<string | undefined>;
+  sendCode: (email: string) => Promise<boolean>;
+  signMessage: (msg: string) => Promise<string | undefined>;
+
+  // Chain management
   switchToChain: (chainInfo: ChainInfo) => Promise<boolean>;
   switchToCChain: () => Promise<boolean>;
   switchToSubnet: () => Promise<boolean>;
 
-  connect: (
-    walletType: WalletType,
-    config?: particleConnect.ParticleConnectConfig,
-  ) => Promise<particleAuthCore.UserInfo | undefined>;
-  getConnected: () => Promise<boolean>;
-  disconnect: () => Promise<void>;
-  sendCode: (email: string) => Promise<boolean>;
-
-  signMessage: (msg: string) => Promise<string | undefined>;
-
-  smartAccounts: Map<number, SmartAccountData>;
-  smartAccount?: SmartAccountData;
+  // Smart account methods
   isDeploy: (chainInfo?: ChainInfo) => Promise<boolean | undefined>;
   getSmartAccountAddress: (
     chainInfo?: ChainInfo,
     scanForUpgradedAccountsFromV1?: boolean,
   ) => Promise<string | undefined>;
+  getEoaAddress: () => Promise<string | undefined>;
+
+  // Multi-chain helpers
   getAllSmartAccounts: () => Promise<Map<number, SmartAccountData>>;
   getSmartAccountForChain: (
     chainInfo: ChainInfo,
   ) => Promise<string | undefined>;
   refreshSmartAccountData: (chainInfo?: ChainInfo) => Promise<void>;
-};
+}
 
-// ---------- context ----------
 const ParticleContext = createContext<ParticleContextType | undefined>(
   undefined,
 );
 
-// ---------- helpers ----------
-function mapSupport(loginType?: LoginType): SupportAuthType | undefined {
-  switch (loginType) {
-    case LoginType.Google:
-      return SupportAuthType.Google;
-    case LoginType.Email:
-      return SupportAuthType.Email;
-    case LoginType.Phone:
-      return SupportAuthType.Phone;
-    case LoginType.Apple:
-      return SupportAuthType.Apple;
-    default:
-      return undefined;
-  }
+ParticleInfo.projectId = '869f3430-7f88-4fe4-afef-1d300f6c5de6'; // your project id
+ParticleInfo.clientKey = 'c8AfXtRdc4L8uK4qDZwi8ruvfZKPsKmkN0mr2Cf0'; // your client key
+
+if (ParticleInfo.projectId === '' || ParticleInfo.clientKey === '') {
+  throw new Error(
+    'You need set project info, Get your project id and client from dashboard, https://dashboard.particle.network',
+  );
 }
 
-function ensureAuthCoreConfig(
-  cfg?: particleConnect.ParticleConnectConfig,
-): particleConnect.ParticleConnectConfig | undefined {
-  if (!cfg) {
-    return cfg;
-  }
-  const has =
-    Array.isArray((cfg as any).supportAuthType) &&
-    (cfg as any).supportAuthType.length > 0;
-  if (!has) {
-    const inferred = mapSupport(cfg.loginType as LoginType | undefined);
-    if (inferred) {
-      return {...cfg, supportAuthType: [inferred]};
-    }
-  }
-  return cfg;
-}
+// Initialize with C-Chain first
+const env = Env.Production;
+particleBase.init(AVALANCHE_C_CHAIN, env);
+particleBase.setSecurityAccountConfig(new SecurityAccountConfig(0, 0));
+particleAuthCore.init();
+// particleAuthCore.setBlindEnable(true);
+particleAA.init(AccountName.BICONOMY_V2());
+particleAA.enableAAMode();
 
-// ---------- provider ----------
+// const result = await particleAuthCore.getBlindEnable();
+
+/**
+ * Provides Particle authentication and multi-chain wallet connection context to its child components.
+ *
+ * The `ParticleProvider` component initializes the Particle SDK, manages user authentication state,
+ * handles multiple smart accounts across different chains, and exposes methods for connecting/disconnecting wallets,
+ * chain switching, and smart account management.
+ *
+ * @param {object} props - The component props.
+ * @param {React.ReactNode} props.children - The child components that will have access to the Particle context.
+ * @returns {JSX.Element} The context provider wrapping the children.
+ */
 export const ParticleProvider: React.FC<{children: React.ReactNode}> = ({
   children,
 }) => {
   const [particleUserInfo, setParticleUserInfo] =
     React.useState<particleAuthCore.UserInfo | null>(null);
-  const [isLoading, setIsLoading] = React.useState(false);
-
+  const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [currentChain, setCurrentChain] =
-    React.useState<ChainInfo>(DEFAULT_CHAIN);
+    React.useState<ChainInfo>(AVALANCHE_C_CHAIN);
   const [smartAccounts, setSmartAccounts] = React.useState<
     Map<number, SmartAccountData>
   >(new Map());
 
-  const [activeWalletType, setActiveWalletType] =
-    React.useState<WalletType | null>(null);
-  const [activeAddress, setActiveAddress] = React.useState<string | null>(null);
-
-  const initOnce = useRef(false);
-
-  // Centralized hard reset for local session/UI
-  const resetSession = React.useCallback(() => {
-    setParticleUserInfo(null);
-    setActiveWalletType(null);
-    setActiveAddress(null);
-    setSmartAccounts(new Map());
-  }, []);
-
-  useEffect(() => {
-    if (initOnce.current) {
-      return;
-    }
-    initOnce.current = true;
-
-    (async () => {
-      // Base / Auth / AA
-      particleBase.init(DEFAULT_CHAIN, Env.Production);
-      particleBase.setSecurityAccountConfig(new SecurityAccountConfig(0, 0));
-      particleAuthCore.init();
-      particleAA.init(AccountName.BICONOMY_V2());
-      particleAA.enableAAMode();
-
-      // Connect init
-      particleConnect.init(DEFAULT_CHAIN, Env.Production, {
-        name: 'RN Demo',
-        icon: 'https://raw.githubusercontent.com/github/explore/main/topics/react/react.png',
-        url: 'https://example.com',
-        description: 'RN Demo',
-      });
-
-      // Wallet adapters
-      try {
-        await (particleConnect as any).setWallets?.([WalletType.AuthCore]);
-      } catch {}
-      try {
-        await (particleConnect as any).setSupportWalletTypes?.([
-          WalletType.AuthCore,
-        ]);
-      } catch {}
-
-      // Make sure Connect is on the same chain from the start
-      await setConnectChain(DEFAULT_CHAIN).catch(() => {});
-
-      // Restore prior session if any
-      await restoreSession();
-    })().catch(e => console.log('init error:', e));
-  }, [restoreSession]);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  async function restoreSession() {
-    const connected = await particleAuthCore.isConnected().catch(() => false);
-    if (!connected) {
-      return;
-    }
-    const user = await particleAuthCore.getUserInfo();
-    const addr = await evm.getAddress().catch(() => undefined);
-    if (user?.uuid && addr) {
-      setParticleUserInfo(user);
-      setActiveWalletType(WalletType.AuthCore);
-      setActiveAddress(addr);
-      await initializeAllSmartAccounts(addr);
-    }
-  }
-
-  // ----- chains -----
+  /**
+   * Switches to a different blockchain network.
+   */
   async function switchToChain(chainInfo: ChainInfo): Promise<boolean> {
     try {
       setIsLoading(true);
-      const ok = await particleBase.setChainInfo(chainInfo);
-      console.log('switchToChain ok:', ok, chainInfo);
-      await setConnectChain(chainInfo).catch(() => {});
-      if (ok) {
+      const result = await particleAuthCore.switchChain(chainInfo);
+      if (result) {
         setCurrentChain(chainInfo);
+        console.log(`Switched to ${chainInfo.name}`);
+        return true;
       }
-      return !!ok;
-    } catch (e) {
-      console.log('switchToChain error:', e);
+      return false;
+    } catch (error) {
+      console.log('Error switching chain:', error);
       return false;
     } finally {
       setIsLoading(false);
     }
   }
-  const switchToCChain = () => switchToChain(DEFAULT_CHAIN);
-  const switchToSubnet = () => switchToChain(ALT_CHAIN);
 
-  // ----- auth/connect -----
+  /**
+   * Switches to Avalanche C-Chain.
+   */
+  async function switchToCChain(): Promise<boolean> {
+    return await switchToChain(AVALANCHE_C_CHAIN);
+  }
+
+  /**
+   * Switches to ZeroOne Subnet.
+   */
+  async function switchToSubnet(): Promise<boolean> {
+    return await switchToChain(ZEROONE_SUBNET);
+  }
+
+  /**
+   * Sends a verification code to the specified email address using the Particle Auth Core service.
+   */
   async function sendCode(email: string) {
-    return particleAuthCore.sendEmailCode(email);
+    return await particleAuthCore.sendEmailCode(email);
   }
 
+  /**
+   * Checks if the user is currently connected via Particle Auth Core.
+   */
   async function getConnected() {
-    const authConnected = await particleAuthCore
-      .isConnected()
-      .catch(() => false);
-    return authConnected || !!activeAddress;
+    return await particleAuthCore.isConnected();
   }
 
+  /**
+   * Connects to a wallet using the Particle Connect SDK and initializes smart accounts.
+   */
   async function connect(
-    walletType: WalletType,
+    walletType: particleConnect.WalletType,
     config?: particleConnect.ParticleConnectConfig,
   ) {
     try {
       setIsLoading(true);
-      let address: string | undefined;
-      let user: particleAuthCore.UserInfo | undefined;
+      await particleConnect.connect(walletType, config);
+      const user = await particleAuthCore.getUserInfo();
+      setParticleUserInfo(user);
+      isConnected = true;
 
-      if (walletType === WalletType.AuthCore) {
-        const cfg = ensureAuthCoreConfig(config);
-        await particleConnect.connect(walletType, cfg);
-        user = await particleAuthCore.getUserInfo().catch(() => undefined);
-        address = await evm.getAddress();
-      } else {
-        await particleConnect.connect(walletType, config);
-        const accounts = await particleConnect.getAccounts(walletType);
-        address = accounts?.[0].publicAddress;
-        try {
-          user = await particleAuthCore.getUserInfo();
-        } catch {}
-      }
+      // Initialize smart accounts for both chains after successful connection
+      await initializeAllSmartAccounts();
 
-      if (!address) {
-        throw new Error('No account returned from wallet');
-      }
-
-      setActiveWalletType(walletType);
-      setActiveAddress(address);
-      if (user) {
-        setParticleUserInfo(user);
-      }
-
-      await initializeAllSmartAccounts(address);
       return user;
     } catch (error) {
-      console.log('connect error:', error);
-      throw error;
+      console.log({error});
+      throw error; // Ném lỗi để component gọi hàm có thể xử lý
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function disconnect(): Promise<void> {
-    setIsLoading(true);
+  /**
+   * Initializes smart accounts for all supported chains.
+   */
+  async function initializeAllSmartAccounts(): Promise<void> {
     try {
-      // Try to disconnect at SDK level, but UI should reset regardless
-      if (activeWalletType === WalletType.AuthCore) {
-        await particleAuthCore.disconnect();
-      } else if (activeWalletType && activeAddress) {
-        await particleConnect.disconnect(activeWalletType, activeAddress);
+      const supportedChains: ChainInfo[] = [ZEROONE_SUBNET, AVALANCHE_C_CHAIN];
+      const smartAccountsMap = new Map<number, SmartAccountData>();
+
+      supportedChains.forEach(chain => {
+        smartAccountsMap.set(chain.id, {
+          chainInfo: chain,
+          lastUpdated: new Date(),
+        });
+      });
+
+      const address = await getEoaAddress();
+      if (!address) {
+        throw new Error('No wallet address EOA available');
       }
-    } catch (e) {
-      console.log('disconnect error (ignored to reset UI):', e);
-    } finally {
-      resetSession(); // <- guarantees the screen flips back to login
-      setIsLoading(false);
+
+      const updatedSmartAccounts = new Map(smartAccountsMap);
+
+      // Initialize smart accounts for both chains
+      for (const [chainId, smartAccountData] of smartAccountsMap) {
+        const chainInfo = smartAccountData.chainInfo;
+
+        try {
+          const smartAccountAddress = await getSmartAccountAddressForChain(
+            address,
+            chainInfo,
+          );
+
+          const isDeployed = await checkIfDeployedForChain(address, chainInfo);
+
+          updatedSmartAccounts.set(chainId, {
+            ...smartAccountData,
+            smartAccountAddress,
+            isDeployed,
+            lastUpdated: new Date(),
+          });
+        } catch (error) {
+          console.log(
+            `Error initializing smart account for ${chainInfo.name}:`,
+            error,
+          );
+        }
+      }
+
+      setSmartAccounts(updatedSmartAccounts);
+      setCurrentChain(AVALANCHE_C_CHAIN);
+    } catch (error) {
+      console.log('Error initializing smart accounts:', error);
     }
   }
 
-  // ----- signing -----
+  /**
+   * Gets the EOA (Externally Owned Account) address.
+   */
+  async function getEoaAddress(): Promise<string | undefined> {
+    try {
+      if (eoaAddress) {
+        return eoaAddress;
+      }
+      eoaAddress = await evm.getAddress();
+      return eoaAddress;
+    } catch (error) {
+      console.log(error);
+    }
+  }
+
+  /**
+   * Signs a given message using the EVM's personalSign method.
+   */
   async function signMessage(message: string) {
     try {
       if (!message) {
-        throw new Error('Empty message');
+        throw new Error('Message to sign cannot be empty');
       }
-      if (!activeWalletType || !activeAddress) {
-        throw new Error('Not connected');
+
+      if (!particleUserInfo?.uuid) {
+        throw new Error('Particle is not connected');
       }
-      const hex = '0x' + Buffer.from(message, 'utf8').toString('hex');
+
+      const walletAddress = await getEoaAddress();
+      if (!walletAddress) {
+        throw new Error('No wallet address available');
+      }
+
+      const hexMessage = '0x' + Buffer.from(message, 'utf8').toString('hex');
+
       return await particleConnect.signMessage(
-        activeWalletType,
-        activeAddress,
-        hex,
+        WalletType.AuthCore,
+        walletAddress,
+        hexMessage,
       );
-    } catch (e) {
-      console.log('signMessage error:', e);
+    } catch (error) {
+      console.log('Sign message error:', error);
     }
   }
 
-  // ----- AA helpers -----
-  async function initializeAllSmartAccounts(ownerAddress: string) {
-    const chains: ChainInfo[] = [DEFAULT_CHAIN, ALT_CHAIN];
-    const next = new Map<number, SmartAccountData>(
-      chains.map(c => [c.id, {chainInfo: c, lastUpdated: new Date()}]),
-    );
+  /**
+   * Disconnects the current user and clears smart account data.
+   */
+  async function disconnect(): Promise<string | undefined> {
+    try {
+      setIsLoading(true);
+      const status = await particleAuthCore.disconnect();
+      const connectionStatus = await getConnected();
+      isConnected = connectionStatus;
+      setParticleUserInfo(null);
 
-    for (const c of chains) {
-      try {
-        const smartAccountAddress = await getSmartAccountAddressForChain(
-          ownerAddress,
-          c,
-        );
-        const deployed = await isDeployedForChain(ownerAddress, c);
-        next.set(c.id, {
-          chainInfo: c,
-          smartAccountAddress,
-          isDeployed: deployed,
-          lastUpdated: new Date(),
-        });
-      } catch (e) {
-        console.log(`init AA ${c.name} error:`, e);
-      }
+      // Clear smart accounts data
+      setSmartAccounts(new Map());
+      eoaAddress = null;
+
+      return status;
+    } catch (error) {
+      console.log('Disconnect error:', error);
+    } finally {
+      setIsLoading(false);
     }
-
-    setSmartAccounts(next);
-    setCurrentChain(DEFAULT_CHAIN);
   }
 
+  /**
+   * Gets smart account address for a specific chain or current chain.
+   */
   async function getSmartAccountAddress(
     chainInfo?: ChainInfo,
     scanForUpgradedAccountsFromV1?: boolean,
   ): Promise<string | undefined> {
     try {
-      if (!activeAddress) {
-        throw new Error('No active address');
-      }
-      const target = chainInfo ?? currentChain;
-
-      const cached = smartAccounts.get(target.id)?.smartAccountAddress;
-      if (cached && !scanForUpgradedAccountsFromV1) {
-        return cached;
+      const address = await getEoaAddress();
+      if (!address) {
+        throw new Error('No wallet address available');
       }
 
-      const addr = await getSmartAccountAddressForChain(
-        activeAddress,
-        target,
-        scanForUpgradedAccountsFromV1,
-      );
+      const targetChain = chainInfo || currentChain;
 
-      if (addr) {
-        const updated = new Map(smartAccounts);
-        const base = updated.get(target.id) ?? {chainInfo: target};
-        updated.set(target.id, {
-          ...base,
-          smartAccountAddress: addr,
-          lastUpdated: new Date(),
-        });
-        setSmartAccounts(updated);
+      // Check if we have cached data
+      const cachedData = smartAccounts.get(targetChain.id);
+      if (cachedData?.smartAccountAddress && !scanForUpgradedAccountsFromV1) {
+        return cachedData.smartAccountAddress;
       }
 
-      return addr;
-    } catch (e) {
-      console.log('getSmartAccountAddress error:', e);
-    }
-  }
-
-  async function getSmartAccountAddressForChain(
-    ownerAddress: string,
-    chainInfo: ChainInfo,
-    scanForUpgradedAccountsFromV1?: boolean,
-  ): Promise<string | undefined> {
-    const account = AccountName.BICONOMY_V2();
-    const params = [
-      {
-        name: account.name,
-        version: account.version,
-        ownerAddress,
-        ...(scanForUpgradedAccountsFromV1 && {scanForUpgradedAccountsFromV1}),
-      },
-    ];
-    const result: SmartAccountInfo[] = await EvmService.getSmartAccount(params);
-    return result?.[0]?.smartAccountAddress;
-  }
-
-  async function isDeploy(chainInfo?: ChainInfo): Promise<boolean | undefined> {
-    try {
-      if (!activeAddress) {
-        return undefined;
-      }
-      const target = chainInfo ?? currentChain;
-
-      const cached = smartAccounts.get(target.id)?.isDeployed;
-      if (typeof cached === 'boolean') {
-        return cached;
-      }
-
-      const deployed = await isDeployedForChain(activeAddress, target);
-
-      const updated = new Map(smartAccounts);
-      const base = updated.get(target.id) ?? {chainInfo: target};
-      updated.set(target.id, {
-        ...base,
-        isDeployed: deployed,
-        lastUpdated: new Date(),
-      });
-      setSmartAccounts(updated);
-
-      return deployed;
-    } catch (e) {
-      console.log('isDeploy error:', e);
-    }
-  }
-
-  async function isDeployedForChain(ownerAddress: string, _chain: ChainInfo) {
-    return particleAA.isDeploy(ownerAddress);
-  }
-
-  async function getSmartAccountForChain(chainInfo: ChainInfo) {
-    return getSmartAccountAddress(chainInfo);
-  }
-
-  async function getAllSmartAccounts() {
-    return smartAccounts;
-  }
-
-  async function refreshSmartAccountData(chainInfo?: ChainInfo) {
-    try {
-      if (!activeAddress) {
-        return;
-      }
-
-      const targets = chainInfo
-        ? [chainInfo]
-        : Array.from(smartAccounts.values()).map(d => d.chainInfo);
-
-      const updated = new Map(smartAccounts);
-
-      for (const chain of targets) {
-        try {
-          const addr = await getSmartAccountAddressForChain(
-            activeAddress,
-            chain,
-          );
-          const deployed = await isDeployedForChain(activeAddress, chain);
-
-          updated.set(chain.id, {
-            chainInfo: chain,
-            smartAccountAddress: addr,
-            isDeployed: deployed,
-            lastUpdated: new Date(),
-          });
-        } catch (e) {
-          console.log(`refresh ${chain.name} error:`, e);
+      // Switch to target chain if needed
+      if (targetChain.id !== currentChain.id) {
+        const switched = await switchToChain(targetChain);
+        if (!switched) {
+          return undefined;
         }
       }
 
-      setSmartAccounts(updated);
-    } catch (e) {
-      console.log('refreshSmartAccountData error:', e);
+      const smartAccountAddress = await getSmartAccountAddressForChain(
+        address,
+        targetChain,
+        scanForUpgradedAccountsFromV1,
+      );
+
+      // Update cache
+      if (smartAccountAddress) {
+        const updatedSmartAccounts = new Map(smartAccounts);
+        const existing = updatedSmartAccounts.get(targetChain.id) || {
+          chainInfo: targetChain,
+        };
+        updatedSmartAccounts.set(targetChain.id, {
+          ...existing,
+          smartAccountAddress,
+          lastUpdated: new Date(),
+        });
+        setSmartAccounts(updatedSmartAccounts);
+      }
+
+      return smartAccountAddress;
+    } catch (error) {
+      console.log('Error getting smart account address:', error);
     }
   }
 
-  const smartAccount = useMemo(
-    () => smartAccounts.get(currentChain.id),
-    [smartAccounts, currentChain.id],
-  );
+  /**
+   * Helper function to get smart account address for a specific chain.
+   */
+  async function getSmartAccountAddressForChain(
+    eoaAddress: string,
+    chainInfo: ChainInfo,
+    scanForUpgradedAccountsFromV1?: boolean,
+  ): Promise<string | undefined> {
+    const smartAccountParam = {
+      name: AccountName.BICONOMY_V2().name,
+      version: AccountName.BICONOMY_V2().version,
+      ownerAddress: eoaAddress,
+      ...(scanForUpgradedAccountsFromV1 && {scanForUpgradedAccountsFromV1}),
+    };
+
+    const result: SmartAccountInfo[] = await EvmService.getSmartAccount([
+      smartAccountParam,
+    ]);
+
+    const smartAccountAddress = result[0]?.smartAccountAddress;
+
+    console.log(
+      `Smart account address for ${chainInfo.name}:`,
+      smartAccountAddress,
+    );
+    return smartAccountAddress;
+  }
+
+  /**
+   * Checks if smart account is deployed for a specific chain or current chain.
+   */
+  async function isDeploy(chainInfo?: ChainInfo): Promise<boolean | undefined> {
+    try {
+      const address = await getEoaAddress();
+      if (!address) {
+        return undefined;
+      }
+
+      const targetChain = chainInfo || currentChain;
+
+      // Check if we have cached data
+      const cachedData = smartAccounts.get(targetChain.id);
+      if (cachedData?.isDeployed !== undefined) {
+        return cachedData.isDeployed;
+      }
+
+      // Switch to target chain if needed
+      if (targetChain.id !== currentChain.id) {
+        const switched = await switchToChain(targetChain);
+        if (!switched) {
+          return undefined;
+        }
+      }
+
+      const result = await checkIfDeployedForChain(address, targetChain);
+
+      // Update cache
+      const updatedSmartAccounts = new Map(smartAccounts);
+      const existing = updatedSmartAccounts.get(targetChain.id) || {
+        chainInfo: targetChain,
+      };
+      updatedSmartAccounts.set(targetChain.id, {
+        ...existing,
+        isDeployed: result,
+        lastUpdated: new Date(),
+      });
+      setSmartAccounts(updatedSmartAccounts);
+
+      return result;
+    } catch (error) {
+      console.log('Error checking deployment status:', error);
+    }
+  }
+
+  /**
+   * Helper function to check if smart account is deployed for a specific chain.
+   */
+  async function checkIfDeployedForChain(
+    eoaAddress: string,
+    chainInfo: ChainInfo,
+  ): Promise<boolean> {
+    const result = await particleAA.isDeploy(eoaAddress);
+    console.log(`Is deployed on ${chainInfo.name}:`, result);
+    return result;
+  }
+
+  /**
+   * Gets smart account address for a specific chain (convenience method).
+   */
+  async function getSmartAccountForChain(
+    chainInfo: ChainInfo,
+  ): Promise<string | undefined> {
+    return await getSmartAccountAddress(chainInfo);
+  }
+
+  /**
+   * Returns all smart accounts data.
+   */
+  async function getAllSmartAccounts(): Promise<Map<number, SmartAccountData>> {
+    return smartAccounts;
+  }
+
+  /**
+   * Refreshes smart account data for a specific chain or all chains.
+   */
+  async function refreshSmartAccountData(chainInfo?: ChainInfo): Promise<void> {
+    try {
+      const address = await getEoaAddress();
+      if (!address) {
+        return;
+      }
+
+      const updatedSmartAccounts = new Map(smartAccounts);
+      const chainsToRefresh = chainInfo
+        ? [chainInfo]
+        : Array.from(smartAccounts.values()).map(data => data.chainInfo);
+
+      for (const chain of chainsToRefresh) {
+        const switched = await switchToChain(chain);
+        if (!switched) {
+          continue;
+        }
+
+        try {
+          const smartAccountAddress = await getSmartAccountAddressForChain(
+            address,
+            chain,
+          );
+          const isDeployed = await checkIfDeployedForChain(address, chain);
+
+          updatedSmartAccounts.set(chain.id, {
+            chainInfo: chain,
+            smartAccountAddress,
+            isDeployed,
+            lastUpdated: new Date(),
+          });
+        } catch (error) {
+          console.log(`Error refreshing data for ${chain.name}:`, error);
+        }
+      }
+
+      setSmartAccounts(updatedSmartAccounts);
+    } catch (error) {
+      console.log('Error refreshing smart account data:', error);
+    }
+  }
+
+  const smartAccount = useMemo(() => {
+    return smartAccounts.get(currentChain.id);
+  }, [smartAccounts]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        isConnected = await getConnected();
+
+        if (particleUserInfo?.uuid && isConnected) {
+          isConnected = true;
+          return;
+        }
+
+        if (isConnected) {
+          const user = await particleAuthCore.getUserInfo();
+          setParticleUserInfo(user);
+
+          await initializeAllSmartAccounts();
+        }
+      } catch (error) {
+        console.log('Initialization error:', error);
+      }
+    })();
+  }, []);
 
   const value: ParticleContextType = {
-    activeWalletType,
-    activeAddress,
     particleUserInfo,
     isLoading,
-
     currentChain,
+    smartAccounts,
+    smartAccount,
+    connect,
+    disconnect,
+    getConnected,
+    sendCode,
+    signMessage,
     switchToChain,
     switchToCChain,
     switchToSubnet,
-
-    connect,
-    getConnected,
-    disconnect,
-    sendCode,
-
-    signMessage,
-
-    smartAccounts,
-    smartAccount,
     isDeploy,
     getSmartAccountAddress,
+    getEoaAddress,
     getAllSmartAccounts,
     getSmartAccountForChain,
     refreshSmartAccountData,
@@ -531,15 +571,15 @@ export const ParticleProvider: React.FC<{children: React.ReactNode}> = ({
   );
 };
 
-// ---------- hooks ----------
 export const useParticle = () => {
-  const ctx = useContext(ParticleContext);
-  if (!ctx) {
-    throw new Error('useParticle must be used within ParticleProvider');
+  const context = useContext(ParticleContext);
+  if (context === undefined) {
+    throw new Error('useParticle must be used within a ParticleProvider');
   }
-  return ctx;
+  return context;
 };
 
+// Helper hook for current chain smart account
 export const useCurrentChainSmartAccount = () => {
   const {currentChain, smartAccounts} = useParticle();
   return smartAccounts.get(currentChain.id);
